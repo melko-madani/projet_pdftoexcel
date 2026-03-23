@@ -131,12 +131,13 @@ def write_dataset_to_sheet(ws, dataset: Dataset) -> None:
         ws.auto_filter.ref = f"A1:{last_col}{current_row - 1}"
 
 
-def write_metadata_sheet(ws, metadata_rows: list[tuple[str, str]]) -> None:
+def write_metadata_sheet(ws, metadata_rows: list[tuple[str, object]]) -> None:
     """Écrit une feuille de métadonnées clé/valeur.
 
     Args:
         ws: Feuille openpyxl.
-        metadata_rows: Liste de tuples (clé, valeur).
+        metadata_rows: Liste de tuples (clé, valeur). Les valeurs float
+            reçoivent le format euro.
     """
     # Headers
     for col_idx, header in enumerate(["Champ", "Valeur"], start=1):
@@ -154,10 +155,16 @@ def write_metadata_sheet(ws, metadata_rows: list[tuple[str, str]]) -> None:
         key_cell.alignment = CELL_ALIGNMENT
         key_cell.border = THIN_BORDER
 
-        val_cell = ws.cell(row=row_idx, column=2, value=value or "")
+        # Ecrire la valeur (garder les float/int tels quels, convertir None en "")
+        display_value = value if value is not None else ""
+        val_cell = ws.cell(row=row_idx, column=2, value=display_value)
         val_cell.font = META_VAL_FONT
         val_cell.alignment = CELL_ALIGNMENT
         val_cell.border = THIN_BORDER
+
+        # Format euro pour les valeurs numeriques
+        if isinstance(value, float):
+            val_cell.number_format = EURO_FORMAT
 
     # Largeurs
     ws.column_dimensions["A"].width = 35

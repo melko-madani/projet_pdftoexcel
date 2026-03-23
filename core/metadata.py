@@ -1,4 +1,9 @@
-"""Extraction des métadonnées des fichiers PDF de dossiers fiscaux TFPB."""
+"""Extraction des métadonnées des fichiers PDF de dossiers fiscaux TFPB.
+
+Ce module sert aussi de wrapper pour les nouveaux modules scripts/ :
+- scripts.raw_extractor : RawMetadata, extraction brute
+- scripts.metadata_transformer : ComputedMetadata, transformation metier
+"""
 
 import logging
 import re
@@ -6,6 +11,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pdfplumber
+
+# Re-exports depuis scripts/ pour compatibilite
+from scripts.raw_extractor import (  # noqa: F401
+    RawMetadata,
+    build_raw_metadata,
+    extract_raw_from_ar,
+    extract_raw_from_courrier,
+    extract_raw_from_depot,
+)
+from scripts.metadata_transformer import (  # noqa: F401
+    ComputedMetadata,
+    compute_metadata,
+    computed_metadata_to_rows,
+)
 
 logger = logging.getLogger(__name__)
 

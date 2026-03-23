@@ -21,6 +21,11 @@ from .excel_writer import (
 )
 from .metadata import (
     DossierMetadata,
+    RawMetadata,
+    ComputedMetadata,
+    build_raw_metadata,
+    compute_metadata,
+    computed_metadata_to_rows,
     detect_pdf_type,
     extract_metadata,
     metadata_to_rows,
@@ -51,6 +56,8 @@ class DemandeResult:
     prefix: str
     numero_demande: str = ""
     metadata: DossierMetadata = field(default_factory=DossierMetadata)
+    raw_metadata: RawMetadata = field(default_factory=RawMetadata)
+    computed_metadata: ComputedMetadata = field(default_factory=ComputedMetadata)
     datasets: list[Dataset] = field(default_factory=list)
     annexe_excel: bytes | None = None
     metadata_excel: bytes | None = None
@@ -87,12 +94,12 @@ def _classify_file(filename: str, parent_dir: str) -> str:
     return detect_pdf_type(filename)
 
 
-def _build_metadata_excel(metadata: DossierMetadata) -> bytes:
-    """Génère l'Excel des métadonnées en mémoire."""
+def _build_metadata_excel_computed(computed: ComputedMetadata) -> bytes:
+    """Génère l'Excel des métadonnées en mémoire avec les données métier."""
     wb = Workbook()
     wb.remove(wb.active)
     ws = wb.create_sheet(title="Métadonnées")
-    meta_rows = metadata_to_rows(metadata)
+    meta_rows = computed_metadata_to_rows(computed)
     write_metadata_sheet(ws, meta_rows)
     buf = io.BytesIO()
     wb.save(buf)
@@ -173,7 +180,7 @@ def extract_zip_to_dossiers(zip_bytes: bytes | io.BytesIO) -> list[DemandeDossie
 def process_demande(
     dossier: DemandeDossier, min_cols: int = MIN_COLS_DEFAULT
 ) -> DemandeResult:
-    """Traite une demande complète : métadonnées + tableaux."""
+    """Traite une demande complète : métadonnées (2 étapes) + tableaux."""
     result = DemandeResult(prefix=dossier.prefix)
 
     # Collecter les PDFs sources
@@ -187,60 +194,44 @@ def process_demande(
         result.source_pdfs["depot"] = dossier.depot_pdf
         result.source_filenames["depot"] = dossier.depot_filename
 
-    metadata = DossierMetadata()
-
-    # Extraire les métadonnées de chaque fichier via fichiers temporaires
-    for file_type, pdf_data in [
-        ("courrier", dossier.courrier_pdf),
-        ("ar", dossier.ar_pdf),
-        ("depot", dossier.depot_pdf),
-    ]:
-        if pdf_data is None:
-            continue
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        try:
-            tmp.write(pdf_data)
-            tmp.close()
-            tmp_path = Path(tmp.name)
-
-            # Utiliser le vrai nom de fichier pour la détection
-            real_name = {
-                "courrier": dossier.courrier_filename,
-                "ar": dossier.ar_filename,
-                "depot": dossier.depot_filename,
-            }[file_type]
-
-            _, meta = extract_metadata(tmp_path)
-            metadata.type_fichiers[file_type] = real_name or ""
-
-            if file_type == "courrier":
-                metadata.numero_demande = meta.get("numero_demande", "")
-                metadata.objet = meta.get("objet", "")
-                metadata.libelle = meta.get("libelle", "")
-                metadata.motif_vacance = meta.get("motif_vacance", "")
-                metadata.date_courrier = meta.get("date_courrier", "")
-                metadata.responsable = meta.get("responsable", "")
-            elif file_type == "depot":
-                metadata.numero_lr_depot = meta.get("numero_lr", "")
-            elif file_type == "ar":
-                metadata.numero_lr_ar = meta.get("numero_lr", "")
-                metadata.date_presentation_ar = meta.get("date_presentation", "")
-                metadata.date_distribution_ar = meta.get("date_distribution", "")
-
-        except Exception as e:
-            logger.error("Erreur métadonnées %s (prefix %s): %s", file_type, dossier.prefix, e)
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
+    # --- Etape 1 : Extraction brute ---
+    try:
+        raw = build_raw_metadata(
+            courrier_bytes=dossier.courrier_pdf,
+            ar_bytes=dossier.ar_pdf,
+            depot_bytes=dossier.depot_pdf,
+            courrier_filename=dossier.courrier_filename or "",
+        )
+        result.raw_metadata = raw
+    except Exception as e:
+        logger.error("Erreur extraction brute prefix %s: %s", dossier.prefix, e)
+        raw = RawMetadata()
 
     # Fallback N° demande
-    if not metadata.numero_demande:
-        metadata.numero_demande = dossier.prefix
+    result.numero_demande = raw.numero_demande or dossier.prefix
 
+    # Remplir aussi le DossierMetadata legacy pour compatibilite
+    metadata = DossierMetadata(
+        numero_demande=result.numero_demande,
+        objet=raw.objet_complet,
+        libelle=raw.adresses,
+        motif_vacance=raw.motif_vacance,
+        date_courrier=raw.date_courrier,
+        responsable=raw.responsable,
+        numero_lr_depot=raw.numero_lr_depot,
+        numero_lr_ar=raw.numero_lr_ar,
+        date_presentation_ar=raw.date_presentation_ar,
+        date_distribution_ar=raw.date_distribution_ar,
+    )
+    if dossier.courrier_filename:
+        metadata.type_fichiers["courrier"] = dossier.courrier_filename
+    if dossier.ar_filename:
+        metadata.type_fichiers["ar"] = dossier.ar_filename
+    if dossier.depot_filename:
+        metadata.type_fichiers["depot"] = dossier.depot_filename
     result.metadata = metadata
-    result.numero_demande = metadata.numero_demande
 
-    # Extraire les tableaux du courrier
+    # --- Extraction des tableaux du courrier ---
     if dossier.courrier_pdf:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         try:
@@ -265,9 +256,21 @@ def process_demande(
         finally:
             Path(tmp.name).unlink(missing_ok=True)
 
-    # Générer l'Excel métadonnées
+    # --- Etape 2 : Transformation en données métier ---
     try:
-        result.metadata_excel = _build_metadata_excel(metadata)
+        computed = compute_metadata(
+            raw,
+            datasets=result.datasets,
+            courrier_bytes=dossier.courrier_pdf,
+        )
+        result.computed_metadata = computed
+    except Exception as e:
+        logger.error("Erreur transformation metadata prefix %s: %s", dossier.prefix, e)
+        computed = ComputedMetadata()
+
+    # Générer l'Excel métadonnées avec les données métier
+    try:
+        result.metadata_excel = _build_metadata_excel_computed(computed)
     except Exception as e:
         logger.error("Erreur génération métadonnées Excel prefix %s: %s", dossier.prefix, e)
 
