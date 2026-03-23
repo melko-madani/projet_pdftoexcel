@@ -1,0 +1,32 @@
+{
+  "Libellé de la Demande": "Rénovation énergétique - Isolation toiture Bâtiment A",
+  "Responsable": "Marie DUPONT",
+  "Type": "Subvention",
+  "Categorie": "Travaux d'économie d'énergie",
+  "Sous-categorie": "Isolation thermique par l'extérieur",
+  "Montant HT": 125000.00,
+  "Nom de l'entreprise réalisant les travaux": "SARL THERMOBAT",
+  "Taux de TVA": 10.0,
+  "Nature des travaux": "Isolation des rampants de toiture + étanchéité",
+  "Montant TTC": 137500.00,
+  "Montant de la subvention": 45000.00,
+  "Référence(s) Avis": [
+    "AVIS-2026-045",
+    "AVIS-2026-046"
+  ],
+  "Adresse": "15 rue de la République, 75001 Paris",
+  "Montant de la demande": 45000.00,
+  "Date limite d'envoi": "2026-04-15",
+  "Type d'envoi": "Recommandé avec accusé de réception",
+  "Numero de recommande": "1A1234567890",
+  "Commentaire": "Documents complets - attestation RT2012 en cours de réception",
+  "Lien escale": "https://espace-client.exemple.fr/dossier/2026-1234",
+  "Nom interlocuteur": "BERNARD",
+  "Prenom interlocuteur": "Jean-Pierre",
+  "Mail interlocuteur": "jp.bernard@exemple.fr",
+  "Tel interlocuteur": "06 12 34 56 78",
+  "N° Programme": "PROG-2026-001",
+  "Nombre de logements": 24,
+  "Nature de dépenses": "Travaux de réhabilitation thermique",
+  "N° d'opération": "OP-2026-0892"
+}
