@@ -114,6 +114,15 @@ def clean_value(value: str, col_type: str):
         return cleaned
 
 
+def _is_annexe_fiscale(headers: list[str]) -> bool:
+    """Détecte si un tableau est une annexe fiscale (contient programme + référence + avis)."""
+    normalized = [normalize_header(h) for h in headers]
+    joined = " ".join(normalized)
+    has_programme = "programme" in joined
+    has_reference_avis = ("référence" in joined or "reference" in joined) and "avis" in joined
+    return has_programme and has_reference_avis
+
+
 def process_tables(tables: list[TableInfo]) -> list[Dataset]:
     """Traite tous les tableaux détectés et retourne des Datasets prêts à l'export.
 
@@ -134,8 +143,24 @@ def process_tables(tables: list[TableInfo]) -> list[Dataset]:
         headers = [clean_cell(h) for h in reference_headers]
         source_pages = sorted(set(t.page_num for t in group))
 
-        # Nom du dataset : une seule feuille si un seul groupe
-        if len(groups) == 1:
+        # Nom du dataset
+        is_annexe = _is_annexe_fiscale(headers)
+
+        if is_annexe:
+            # Compter combien de groupes sont des annexes pour numéroter si besoin
+            annexe_count = sum(
+                1 for g in groups[:group_idx + 1]
+                if _is_annexe_fiscale([clean_cell(h) for h in g[0].headers])
+            )
+            total_annexes = sum(
+                1 for g in groups
+                if _is_annexe_fiscale([clean_cell(h) for h in g[0].headers])
+            )
+            if total_annexes == 1:
+                name = "Annexe"
+            else:
+                name = f"Annexe {annexe_count}"
+        elif len(groups) == 1:
             name = "Données consolidées"
         else:
             pages_str = ", ".join(str(p) for p in source_pages)

@@ -38,10 +38,19 @@ python extractor.py batch ./dossier_pdfs/
 python extractor.py batch ./dossier_pdfs/ --output-dir ./resultats/
 ```
 
-### Options
+### Interface web (Streamlit)
+
+```bash
+streamlit run app.py
+```
+
+Ouvre le navigateur sur `localhost:8501` avec une interface drag & drop pour uploader des PDFs, visualiser les tableaux détectés et télécharger les fichiers Excel.
+
+### Options CLI
 
 - `--output` / `-o` : chemin du fichier Excel de sortie
 - `--output-dir` / `-o` : dossier de sortie (mode batch)
+- `--min-cols` : nombre minimum de colonnes pour un tableau valide (défaut: 8)
 - `--verbose` / `-v` : logs détaillés
 
 ## Fonctionnalités
@@ -59,3 +68,4 @@ python extractor.py batch ./dossier_pdfs/ --output-dir ./resultats/
 - `pdfplumber` — lecture PDF et détection de tableaux
 - `openpyxl` — création Excel avec formatage
 - `typer` — interface CLI
+- `streamlit` — interface web

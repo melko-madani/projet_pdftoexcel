@@ -1,4 +1,4 @@
-"""Interface Streamlit pour l'extraction de tableaux PDF vers Excel."""
+"""Interface Streamlit pour PDF Table Extractor."""
 
 import io
 import tempfile
@@ -7,9 +7,14 @@ from pathlib import Path
 
 import streamlit as st
 
-from core.excel_writer import write_excel
-from core.parser import process_tables
-from core.scanner import scan_pdf
+from core.pipeline import (
+    DemandeDossier,
+    build_output_zip,
+    process_demande,
+    process_zip,
+)
+
+DEFAULT_MIN_COLS = 8
 
 # =====================
 # Configuration
@@ -18,13 +23,14 @@ LOGO_PATH = Path(__file__).parent / "image.jpg"
 
 st.set_page_config(
     page_title="Extraction Courrier PDF",
-    page_icon="image.jpg",
+    page_icon="📄",
 )
 
 # En-tête avec logo
 col_logo, col_title = st.columns([1, 4])
 with col_logo:
-    st.image(str(LOGO_PATH), width=120)
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=120)
 with col_title:
     st.title("Extracteur PDF → Excel")
     st.caption("Outil interne - Extraction des courriers fiscaux")
@@ -35,86 +41,117 @@ st.divider()
 # Upload
 # =====================
 uploaded_files = st.file_uploader(
-    "Choisir un ou plusieurs fichiers PDF",
-    type=["pdf"],
+    "Choisir un ou plusieurs fichiers PDF / ZIP",
+    type=["pdf", "zip"],
     accept_multiple_files=True,
 )
 
 if uploaded_files:
-    st.info(f"{len(uploaded_files)} fichier(s) sélectionné(s)")
+    zip_files = [f for f in uploaded_files if f.name.lower().endswith(".zip")]
+    pdf_files = [f for f in uploaded_files if f.name.lower().endswith(".pdf")]
 
-    if st.button("🚀 Extraire les données", type="primary"):
-        progress = st.progress(0)
-        status = st.empty()
+    parts = []
+    if zip_files:
+        parts.append(f"{len(zip_files)} archive(s) ZIP")
+    if pdf_files:
+        parts.append(f"{len(pdf_files)} courrier(s) PDF")
+    st.info(f"{len(uploaded_files)} fichier(s) sélectionné(s) — {', '.join(parts)}")
 
-        all_excel = []  # (filename, excel_bytes)
+    if st.button("🚀 Extraire les données", type="primary", use_container_width=True):
+        errors = []
+        results = []
 
-        for i, pdf_file in enumerate(uploaded_files):
-            status.text(f"Traitement de : {pdf_file.name}...")
+        if zip_files:
+            # Mode ZIP
+            zip_data = zip_files[0].getvalue()
+            progress = st.progress(0, text="Analyse du lot de demandes...")
 
-            try:
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".pdf"
-                ) as tmp:
-                    tmp.write(pdf_file.read())
-                    tmp_path = Path(tmp.name)
+            def on_progress(current, total, prefix):
+                if total > 0 and prefix:
+                    pct = current / total
+                    progress.progress(
+                        pct,
+                        text=f"Traitement de la demande {prefix} ({current + 1}/{total})...",
+                    )
 
-                scan_result = scan_pdf(tmp_path, min_cols=8)
+            results = process_zip(
+                zip_data, min_cols=DEFAULT_MIN_COLS, on_progress=on_progress
+            )
+            progress.progress(1.0, text="Extraction terminée.")
 
-                if not scan_result.tables:
-                    st.warning(f"**{pdf_file.name}** : aucun tableau détecté.")
-                    continue
+            for r in results:
+                if r.error:
+                    errors.append(f"Dossier {r.prefix} : fichier illisible, ignoré.")
+                if not r.datasets and r.source_pdfs.get("courrier"):
+                    errors.append(
+                        f"Courrier N°{r.prefix} : aucun tableau fiscal détecté."
+                    )
+        else:
+            # Mode PDF
+            progress = st.progress(0, text="Analyse des courriers...")
+            total = len(pdf_files)
 
-                datasets = process_tables(scan_result.tables)
+            for idx, f in enumerate(pdf_files):
+                progress.progress(
+                    idx / total,
+                    text=f"Traitement {idx + 1}/{total} : {f.name}...",
+                )
 
-                if not datasets:
-                    st.warning(f"**{pdf_file.name}** : aucune donnée exploitable.")
-                    continue
+                prefix = Path(f.name).stem.split("-")[0]
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+                try:
+                    tmp.write(f.getbuffer())
+                    tmp.close()
 
-                output_path = tmp_path.with_suffix(".xlsx")
-                write_excel(datasets, output_path)
+                    dossier = DemandeDossier(
+                        prefix=prefix,
+                        courrier_pdf=Path(tmp.name).read_bytes(),
+                        courrier_filename=f.name,
+                    )
+                    result = process_demande(dossier, min_cols=DEFAULT_MIN_COLS)
+                    results.append(result)
 
-                excel_bytes = output_path.read_bytes()
-                all_excel.append((pdf_file.name, excel_bytes))
+                    if result.error:
+                        errors.append(f"`{f.name}` : fichier illisible.")
+                    if not result.datasets:
+                        errors.append(
+                            f"`{f.name}` : aucun tableau fiscal détecté."
+                        )
+                except Exception as e:
+                    errors.append(f"Erreur sur `{f.name}` : {e}")
+                finally:
+                    Path(tmp.name).unlink(missing_ok=True)
 
-                tmp_path.unlink(missing_ok=True)
-                output_path.unlink(missing_ok=True)
-
-            except Exception as e:
-                st.error(f"Erreur sur **{pdf_file.name}** : {e}")
-
-            progress.progress((i + 1) / len(uploaded_files))
+            progress.progress(1.0, text="Extraction terminée.")
 
         # =====================
         # Résultats
         # =====================
-        status.success(
-            f"Extraction terminée ! {len(all_excel)} / "
-            f"{len(uploaded_files)} PDF traité(s) avec succès."
-        )
+        if results:
+            total_rows = sum(r.row_count for r in results)
+            total_tables = sum(r.table_count for r in results)
 
-        # Téléchargements
-        for filename, excel_bytes in all_excel:
-            excel_name = Path(filename).stem + ".xlsx"
-            st.download_button(
-                label=f"📥 Télécharger {excel_name}",
-                data=excel_bytes,
-                file_name=excel_name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            st.success(
+                f"{len(results)} demande(s) traitée(s) — "
+                f"{total_tables} annexe(s) extraite(s), "
+                f"{total_rows} lignes au total."
             )
 
-        if len(all_excel) > 1:
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                for filename, excel_bytes in all_excel:
-                    excel_name = Path(filename).stem + ".xlsx"
-                    zf.writestr(excel_name, excel_bytes)
-            zip_buffer.seek(0)
+            for err in errors:
+                st.warning(err)
 
-            st.download_button(
-                label="📥 Télécharger tout (ZIP)",
-                data=zip_buffer,
-                file_name="extraction_courriers.zip",
-                mime="application/zip",
-                type="primary",
-            )
+            output_data = build_output_zip(results)
+
+            if output_data:
+                st.download_button(
+                    label="📥 Télécharger le dossier structuré (.zip)",
+                    data=output_data,
+                    file_name="resultats_extraction.zip",
+                    mime="application/zip",
+                    type="primary",
+                    use_container_width=True,
+                )
+        else:
+            st.error("Aucune demande trouvée. Vérifiez vos fichiers.")
+            for err in errors:
+                st.warning(err)

@@ -7,7 +7,14 @@ from pathlib import Path
 import typer
 
 from core.excel_writer import write_excel
+from core.metadata import (
+    extract_metadata,
+    format_metadata_report,
+    metadata_to_rows,
+    process_dossier,
+)
 from core.parser import process_tables
+from core.pipeline import build_output_zip, process_zip
 from core.scanner import format_scan_report, scan_pdf
 
 app = typer.Typer(
@@ -93,6 +100,10 @@ def extract(
     # Résumé
     total_rows = sum(len(ds.data_rows) + len(ds.total_rows) for ds in datasets)
     typer.echo(f"\nTerminé ! {total_rows} lignes exportées dans {len(datasets)} feuille(s).")
+    for ds in datasets:
+        if ds.name.startswith("Annexe"):
+            pages_str = ", ".join(str(p) for p in ds.source_pages)
+            typer.echo(f'INFO: La feuille "{ds.name}" contient les tableaux consolidés des pages {pages_str}')
     typer.echo(f"Fichier : {output.resolve()}")
 
 
@@ -163,6 +174,150 @@ def batch(
     typer.echo(
         f"Résumé : {success_count} réussi(s), {skip_count} ignoré(s), {error_count} erreur(s)"
     )
+
+
+@app.command()
+def metadata(
+    pdf_path: Path = typer.Argument(..., help="Chemin vers le fichier PDF."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Logs détaillés."),
+) -> None:
+    """Extrait et affiche les métadonnées d'un fichier PDF."""
+    setup_logging(verbose)
+
+    if not pdf_path.exists():
+        typer.echo(f"Erreur : fichier introuvable — {pdf_path}", err=True)
+        raise typer.Exit(1)
+
+    pdf_type, meta = extract_metadata(pdf_path)
+    typer.echo(f"Type détecté : {pdf_type}")
+    typer.echo(f"Fichier : {pdf_path.name}")
+    typer.echo("")
+    for key, value in meta.items():
+        if key in ("type", "filename"):
+            continue
+        display = value if value else "(non trouvé)"
+        typer.echo(f"  {key:25s} : {display}")
+
+
+@app.command()
+def preprocess(
+    input_dir: Path = typer.Argument(..., help="Dossier contenant les fichiers PDF du dossier de demande."),
+    output: Path = typer.Option(
+        None, "--output", "-o",
+        help="Chemin du fichier Excel de sortie.",
+    ),
+    min_cols: int = typer.Option(8, "--min-cols", help="Nombre minimum de colonnes pour un tableau valide."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Logs détaillés."),
+) -> None:
+    """Pré-processing d'un dossier : détecte les types, extrait métadonnées et tableaux."""
+    setup_logging(verbose)
+
+    if not input_dir.exists() or not input_dir.is_dir():
+        typer.echo(f"Erreur : dossier introuvable — {input_dir}", err=True)
+        raise typer.Exit(1)
+
+    # Extraction des métadonnées
+    typer.echo(f"Analyse du dossier {input_dir.name}...")
+    dossier = process_dossier(input_dir)
+    report = format_metadata_report(dossier)
+    typer.echo(report)
+
+    # Extraction des tableaux depuis tous les PDF
+    pdf_files = sorted(input_dir.glob("*.pdf"))
+    all_tables = []
+
+    for pdf_file in pdf_files:
+        result = scan_pdf(pdf_file, min_cols=min_cols)
+        if result.tables:
+            typer.echo(f"  {pdf_file.name} : {len(result.tables)} tableau(x)")
+            all_tables.extend(result.tables)
+
+    if not all_tables:
+        typer.echo("\nAucun tableau détecté dans les PDF du dossier.")
+        raise typer.Exit(0)
+
+    # Traitement et export
+    datasets = process_tables(all_tables)
+    if not datasets:
+        typer.echo("\nAucune donnée exploitable après nettoyage.")
+        raise typer.Exit(0)
+
+    if output is None:
+        demande_id = dossier.numero_demande or "dossier"
+        output = input_dir / f"demande_{demande_id}_extraction.xlsx"
+
+    meta_rows = metadata_to_rows(dossier)
+    write_excel(datasets, output, metadata_rows=meta_rows)
+
+    total_rows = sum(len(ds.data_rows) + len(ds.total_rows) for ds in datasets)
+    typer.echo(f"\nTerminé ! {total_rows} lignes + métadonnées exportées.")
+    for ds in datasets:
+        if ds.name.startswith("Annexe"):
+            pages_str = ", ".join(str(p) for p in ds.source_pages)
+            typer.echo(f'INFO: La feuille "{ds.name}" contient les tableaux consolidés des pages {pages_str}')
+    typer.echo(f"Fichier : {output.resolve()}")
+
+
+@app.command(name="process-zip")
+def process_zip_cmd(
+    zip_path: Path = typer.Argument(..., help="Chemin vers le fichier ZIP contenant les dossiers de demandes."),
+    output: Path = typer.Option(
+        None, "--output", "-o",
+        help="Chemin du fichier ZIP de sortie. Par défaut : resultats_extraction.zip",
+    ),
+    min_cols: int = typer.Option(8, "--min-cols", help="Nombre minimum de colonnes pour un tableau valide."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Logs détaillés."),
+) -> None:
+    """Traite un ZIP de dossiers de demandes et génère un ZIP structuré."""
+    setup_logging(verbose)
+
+    if not zip_path.exists():
+        typer.echo(f"Erreur : fichier introuvable — {zip_path}", err=True)
+        raise typer.Exit(1)
+
+    if output is None:
+        output = zip_path.parent / "resultats_extraction.zip"
+
+    typer.echo(f"Traitement de {zip_path.name}...")
+
+    zip_data = zip_path.read_bytes()
+
+    def on_progress(current, total, prefix):
+        if prefix:
+            typer.echo(f"  [{current + 1}/{total}] Demande {prefix}...")
+        else:
+            typer.echo("Traitement terminé.")
+
+    results = process_zip(zip_data, min_cols=min_cols, on_progress=on_progress)
+
+    if not results:
+        typer.echo("Aucune demande trouvée dans le ZIP.")
+        raise typer.Exit(0)
+
+    # Rapport
+    typer.echo(f"\n{'='*60}")
+    typer.echo(f"{'Demandes traitées':30s} : {len(results)}")
+    for r in results:
+        status = "OK" if not r.error else f"ERREUR: {r.error}"
+        courrier = "oui" if r.source_pdfs.get('courrier') else "non"
+        ar = "oui" if r.source_pdfs.get('ar') else "non"
+        depot = "oui" if r.source_pdfs.get('depot') else "non"
+        typer.echo(
+            f"  Demande {r.prefix} (N°{r.numero_demande}) : "
+            f"courrier={courrier}, AR={ar}, dépôt={depot}, "
+            f"{r.row_count} lignes — {status}"
+        )
+        for ds in r.datasets:
+            if ds.name.startswith("Annexe"):
+                pages_str = ", ".join(str(p) for p in ds.source_pages)
+                typer.echo(f'    → Feuille "{ds.name}" : pages {pages_str}')
+    typer.echo(f"{'='*60}")
+
+    # Génération du ZIP
+    typer.echo(f"\nGénération de {output}...")
+    output_data = build_output_zip(results)
+    output.write_bytes(output_data)
+    typer.echo(f"Fichier créé : {output.resolve()} ({len(output_data) // 1024} Ko)")
 
 
 if __name__ == "__main__":
