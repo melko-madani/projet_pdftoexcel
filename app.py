@@ -12,6 +12,7 @@ from pathlib import Path
 import streamlit as st
 
 from core.extract_columns import extract_target_columns_from_pdf
+from core.extract_metadata_json import extract_04_from_pdf
 from core.pipeline import (
     DemandeDossier,
     DemandeResult,
@@ -86,6 +87,8 @@ def main():
         st.session_state.errors = []
     if "json_03" not in st.session_state:
         st.session_state.json_03 = None
+    if "json_04" not in st.session_state:
+        st.session_state.json_04 = None
 
     st.title("\U0001f4c4 PDF Table Extractor")
 
@@ -107,6 +110,7 @@ def main():
                 st.session_state.processing_done = False
                 st.session_state.errors = []
                 st.session_state.json_03 = None
+                st.session_state.json_04 = None
                 st.rerun()
 
         with st.expander("Options avancees"):
@@ -313,6 +317,52 @@ def _run_extraction(uploaded_files: list, min_cols: int):
     json_bytes = json.dumps(json_data, ensure_ascii=False, indent=2).encode("utf-8")
     st.session_state.json_03 = json_bytes
 
+    # --- Extraction ciblée : 04.json ---
+    json_04_data = {
+        "colonnes_extraites": [
+            "Sous-categorie",
+            "Montant HT",
+            "Nom de l'entreprise",
+            "Taux de TVA",
+            "Nature des travaux",
+            "Montant TTC",
+            "Montant de la subvention",
+        ],
+        "arbre_sous_categories": {
+            "Degrevement pour Travaux": {
+                "Accessibilite PMR": [
+                    "Amenagement parties communes",
+                    "Amenagement parties privatives",
+                    "Ascenseur",
+                    "Cheminements parties communes",
+                    "Elargissement/Amenagement parking",
+                    "Global",
+                ],
+                "Economie d'energie": [
+                    "Isolation",
+                    "Chauffage/Refroidissement",
+                    "Eclairage",
+                    "Eau chaude",
+                    "Global",
+                ],
+            }
+        },
+        "nombre_fichiers": len(pdf_files) if not zip_files else 0,
+        "fichiers": [],
+    }
+
+    if not zip_files:
+        for f in pdf_files:
+            f.seek(0)
+            data_04 = extract_04_from_pdf(f.getvalue(), f.name)
+            json_04_data["fichiers"].append({
+                "nom_fichier": f.name,
+                "donnees": data_04,
+            })
+
+    json_04_bytes = json.dumps(json_04_data, ensure_ascii=False, indent=2).encode("utf-8")
+    st.session_state.json_04 = json_04_bytes
+
     # Stocker les resultats
     if results:
         st.session_state.results = results
@@ -417,6 +467,17 @@ def _render_results():
             label="Telecharger 03.json (Ref. avis, Adresse, Montant)",
             data=json_03,
             file_name="03.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+    # Telechargement 04.json
+    json_04 = st.session_state.get("json_04")
+    if json_04:
+        st.download_button(
+            label="Telecharger 04.json (Sous-cat, Montants, Entreprise, TVA)",
+            data=json_04,
+            file_name="04.json",
             mime="application/json",
             use_container_width=True,
         )
