@@ -4,12 +4,14 @@ Refonte UX basee sur les 10 heuristiques de Nielsen.
 """
 
 import io
+import json
 import tempfile
 import zipfile
 from pathlib import Path
 
 import streamlit as st
 
+from core.extract_columns import extract_target_columns_from_pdf
 from core.pipeline import (
     DemandeDossier,
     DemandeResult,
@@ -82,6 +84,8 @@ def main():
         st.session_state.processing_done = False
     if "errors" not in st.session_state:
         st.session_state.errors = []
+    if "json_03" not in st.session_state:
+        st.session_state.json_03 = None
 
     st.title("\U0001f4c4 PDF Table Extractor")
 
@@ -102,6 +106,7 @@ def main():
                 st.session_state.output_data = None
                 st.session_state.processing_done = False
                 st.session_state.errors = []
+                st.session_state.json_03 = None
                 st.rerun()
 
         with st.expander("Options avancees"):
@@ -282,6 +287,32 @@ def _run_extraction(uploaded_files: list, min_cols: int):
 
         progress.progress(1.0, text="Extraction terminee.")
 
+    # --- Extraction ciblée : 03.json ---
+    json_data = {
+        "colonnes_extraites": [
+            "Référence de l'avis",
+            "Adresse",
+            "Montant de dégrèvement",
+        ],
+        "nombre_fichiers": len(pdf_files) if not zip_files else 0,
+        "fichiers": [],
+        "nombre_total_lignes": 0,
+    }
+
+    if not zip_files:
+        for f in pdf_files:
+            f.seek(0)
+            rows = extract_target_columns_from_pdf(f.getvalue(), f.name)
+            json_data["fichiers"].append({
+                "nom_fichier": f.name,
+                "nombre_lignes": len(rows),
+                "donnees": rows,
+            })
+            json_data["nombre_total_lignes"] += len(rows)
+
+    json_bytes = json.dumps(json_data, ensure_ascii=False, indent=2).encode("utf-8")
+    st.session_state.json_03 = json_bytes
+
     # Stocker les resultats
     if results:
         st.session_state.results = results
@@ -377,6 +408,17 @@ def _render_results():
             type="primary",
             use_container_width=True,
             help="Archive ZIP contenant un dossier par demande avec les PDF originaux et les Excel generes.",
+        )
+
+    # Telechargement 03.json
+    json_03 = st.session_state.get("json_03")
+    if json_03:
+        st.download_button(
+            label="Telecharger 03.json (Ref. avis, Adresse, Montant)",
+            data=json_03,
+            file_name="03.json",
+            mime="application/json",
+            use_container_width=True,
         )
 
     # Footer
