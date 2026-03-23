@@ -180,7 +180,7 @@ def extract_from_datasets(datasets: list) -> TableExtractedData:
 
     return TableExtractedData(
         references_avis=", ".join(refs_set),
-        adresses=" / ".join(addrs_set),
+        adresses=";".join(addrs_set),
         montant_degrevement_total=montant_sum,
         numero_programme=", ".join(progs_set),
         commune=", ".join(communes_set) if len(communes_set) > 1 else (communes_set[0] if communes_set else ""),
