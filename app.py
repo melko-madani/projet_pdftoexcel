@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from core.pipeline import (
@@ -327,74 +328,37 @@ def _render_results():
     """Affiche les resultats apres traitement."""
     results = st.session_state.results
     output_data = st.session_state.output_data
-    errors = st.session_state.errors
 
     if not results:
         st.error("Aucune demande trouvee. Verifiez le contenu de votre fichier et re-deposez-le.")
         return
 
-    # Succes
-    total_rows = sum(r.row_count for r in results)
-    total_tables = sum(r.table_count for r in results)
+    # Metriques
+    total = len(results)
+    avec_tableau = sum(1 for r in results if r.annexe_excel)
+    sans_tableau = total - avec_tableau
 
-    st.success(
-        f"{len(results)} demande(s) traitee(s) \u2014 "
-        f"{total_tables} annexe(s) fiscale(s) extraite(s), "
-        f"{total_rows} lignes au total."
-    )
-
-    # Erreurs / avertissements
-    for err in errors:
-        st.warning(err)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Demandes", total)
+    col2.metric("Avec tableaux", avec_tableau)
+    col3.metric("Sans tableau", sans_tableau)
 
     st.divider()
 
-    # Liste des demandes
-    st.markdown("**Dossiers generes :**")
+    # Tableau recapitulatif
+    rows = []
     for r in results:
-        name = _readable_demande_name(r)
-        if r.datasets:
-            st.markdown(f"- \U0001f4c2 {name}")
-        elif r.error:
-            st.markdown(f"- \u274c {name}")
-        else:
-            st.markdown(f"- \U0001f4c2 {name} *(pas de tableau)*")
+        statut = "Annexe" if r.annexe_excel else "Info seule"
+        libelle = r.computed_metadata.libelle_demande if r.computed_metadata else ""
+        rows.append({
+            "N\u00b0": r.prefix,
+            "Libelle": libelle,
+            "Statut": statut,
+        })
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
     st.divider()
-
-    # Apercu optionnel
-    with st.expander("Voir le detail par demande"):
-        for r in results:
-            st.markdown(f"**Demande N\u00b0{r.prefix}**")
-
-            cols = st.columns(4)
-            cols[0].caption(
-                f"Courrier : {'oui' if r.source_pdfs.get('courrier') else 'non fourni'}"
-            )
-            cols[1].caption(
-                f"AR : {'oui' if r.source_pdfs.get('ar') else 'non fourni'}"
-            )
-            cols[2].caption(
-                f"Depot : {'oui' if r.source_pdfs.get('depot') else 'non fourni'}"
-            )
-            cols[3].caption(f"Lignes : {r.row_count}")
-
-            if r.datasets:
-                annexe_datasets = [ds for ds in r.datasets if "annexe" in ds.name.lower()]
-                for ds in annexe_datasets:
-                    preview_rows = ds.data_rows[:5]
-                    if preview_rows:
-                        preview_data = []
-                        for row in preview_rows:
-                            row_dict = {}
-                            for i, header in enumerate(ds.headers):
-                                row_dict[header] = row[i] if i < len(row) else None
-                            preview_data.append(row_dict)
-                        st.dataframe(preview_data, use_container_width=True)
-                        if len(ds.data_rows) > 5:
-                            st.caption(f"Apercu : 5 lignes sur {len(ds.data_rows)}")
-
-            st.divider()
 
     # Telechargement
     if output_data:
@@ -405,7 +369,6 @@ def _render_results():
             mime="application/zip",
             type="primary",
             use_container_width=True,
-            help="Archive ZIP contenant un dossier par demande avec les PDF originaux et les Excel generes.",
         )
 
     if st.button(

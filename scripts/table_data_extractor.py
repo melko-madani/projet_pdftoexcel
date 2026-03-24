@@ -1,8 +1,16 @@
 """Extraction de donnees specifiques depuis les colonnes des tableaux annexes."""
 
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+
+def _strip_accents(text: str) -> str:
+    """Supprime les accents d'un texte."""
+    return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
 
 
 def _normalize_header(header: str) -> str:
@@ -12,29 +20,37 @@ def _normalize_header(header: str) -> str:
     return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
 
 
+def _normalize_for_search(text: str) -> str:
+    """Normalise un texte pour la recherche : sans accents, sans espaces, sans apostrophes, lowercase."""
+    text = text.replace("\n", "").lower()
+    text = _strip_accents(text)
+    text = text.replace(" ", "").replace("'", "").replace("\u2019", "")
+    return text
+
+
 def find_column_index(headers: list[str], keywords: list[str]) -> int | None:
     """Trouve l'index d'une colonne par mots-cles dans le header.
 
     Tous les keywords doivent etre presents dans le header normalise.
-    Compare aussi sur la version sans espaces pour tolerer les coupures
-    type "program me" introduites par pdfplumber.
+    Normalise en supprimant accents, espaces et apostrophes pour tolerer
+    les variantes introduites par pdfplumber.
     Retourne None si pas trouve.
     """
     for i, h in enumerate(headers):
         if not h:
             continue
-        h_norm = _normalize_header(h)
-        h_no_spaces = h_norm.replace(" ", "")
-        if all(kw.replace(" ", "") in h_no_spaces for kw in keywords):
+        h_clean = _normalize_for_search(h)
+        if all(_normalize_for_search(kw) in h_clean for kw in keywords):
             return i
     return None
 
 
 def find_column_index_exact(headers: list[str], keyword: str) -> int | None:
-    """Trouve l'index d'une colonne par match exact du keyword."""
+    """Trouve l'index d'une colonne par match exact du keyword (sans accents)."""
+    kw_norm = _strip_accents(keyword.lower().strip())
     for i, h in enumerate(headers):
         h_norm = _normalize_header(h)
-        if h_norm == keyword:
+        if h_norm == kw_norm:
             return i
     return None
 
@@ -152,6 +168,11 @@ def extract_from_datasets(datasets: list) -> TableExtractedData:
         montant_col = find_column_index(headers, ["montant", "degrevement"])
         prog_col = find_column_index(headers, ["programme"])
         commune_col = find_column_index_exact(headers, "commune")
+
+        logger.info(
+            "Dataset '%s': ref=%s, addr=%s, montant=%s, prog=%s, commune=%s",
+            ds.name, ref_col, addr_col, montant_col, prog_col, commune_col,
+        )
 
         for row in ds.data_rows:
             # References avis

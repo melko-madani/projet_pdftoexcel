@@ -155,7 +155,7 @@ def extract_zip_to_dossiers(zip_bytes: bytes | io.BytesIO) -> list[DemandeDossie
             prefix = _extract_prefix(filename)
 
             if not prefix:
-                logger.warning("Pas de préfixe numérique pour %s, ignoré", filename)
+                logger.warning("Pas de prefixe numerique pour %s, ignore", filename)
                 continue
 
             pdf_data = zf.read(entry)
@@ -182,7 +182,7 @@ def extract_zip_to_dossiers(zip_bytes: bytes | io.BytesIO) -> list[DemandeDossie
                 logger.info("Type inconnu pour %s (prefix %s)", filename, prefix)
 
     result = sorted(dossiers.values(), key=lambda d: d.prefix)
-    logger.info("ZIP extrait : %d demande(s) détectée(s)", len(result))
+    logger.info("ZIP extrait : %d demande(s) detectee(s)", len(result))
     return result
 
 
@@ -273,7 +273,7 @@ def process_demande(
         except Exception as e:
             logger.error("Erreur extraction colonnes prefix %s: %s", dossier.prefix, e)
 
-    # --- Etape 2 : Transformation en données métier ---
+    # --- Etape 2 : Transformation en donnees metier ---
     try:
         computed = compute_metadata(
             raw,
@@ -287,11 +287,11 @@ def process_demande(
         logger.error("Erreur transformation metadata prefix %s: %s", dossier.prefix, e)
         computed = ComputedMetadata()
 
-    # Générer l'Excel métadonnées avec les données métier
+    # Generer l'Excel metadonnees avec les donnees metier
     try:
         result.metadata_excel = _build_metadata_excel_computed(computed)
     except Exception as e:
-        logger.error("Erreur génération métadonnées Excel prefix %s: %s", dossier.prefix, e)
+        logger.error("Erreur generation metadonnees Excel prefix %s: %s", dossier.prefix, e)
 
     logger.info(
         "Demande %s : N°%s, %d tableaux, %d lignes",
@@ -319,7 +319,7 @@ def process_zip(
     dossiers = extract_zip_to_dossiers(zip_bytes)
 
     if not dossiers:
-        logger.warning("Aucune demande trouvée dans le ZIP.")
+        logger.warning("Aucune demande trouvee dans le ZIP.")
         return []
 
     results = []

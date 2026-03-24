@@ -189,7 +189,7 @@ def write_excel(
         Le chemin du fichier créé.
     """
     if not datasets and not metadata_rows:
-        logger.warning("Aucun dataset à écrire.")
+        logger.warning("Aucun dataset a ecrire.")
         return output_path
 
     output_path = Path(output_path)
@@ -203,19 +203,19 @@ def write_excel(
     if metadata_rows:
         ws_meta = wb.create_sheet(title="Métadonnées")
         write_metadata_sheet(ws_meta, metadata_rows)
-        logger.info("Écriture de la feuille 'Métadonnées' : %d champs", len(metadata_rows))
+        logger.info("Ecriture de la feuille Metadonnees : %d champs", len(metadata_rows))
 
     for dataset in datasets:
         sheet_name = _sanitize_sheet_name(dataset.name)
         ws = wb.create_sheet(title=sheet_name)
 
         logger.info(
-            "Écriture de la feuille '%s' : %d lignes + %d totaux",
+            "Ecriture de la feuille '%s' : %d lignes + %d totaux",
             sheet_name, len(dataset.data_rows), len(dataset.total_rows),
         )
 
         write_dataset_to_sheet(ws, dataset)
 
     wb.save(output_path)
-    logger.info("Fichier Excel créé : %s", output_path)
+    logger.info("Fichier Excel cree : %s", output_path)
     return output_path

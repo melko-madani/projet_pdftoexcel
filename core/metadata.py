@@ -230,7 +230,7 @@ def process_dossier(dir_path: Path) -> DossierMetadata:
     pdf_files = sorted(dir_path.glob("*.pdf"))
 
     if not pdf_files:
-        logger.warning("Aucun PDF trouvé dans %s", dir_path)
+        logger.warning("Aucun PDF trouve dans %s", dir_path)
         return DossierMetadata()
 
     dossier = DossierMetadata()

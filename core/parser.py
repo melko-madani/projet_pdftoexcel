@@ -142,7 +142,7 @@ def process_tables(tables: list[TableInfo]) -> list[Dataset]:
     - Sépare les lignes de total
     """
     if not tables:
-        logger.warning("Aucun tableau à traiter.")
+        logger.warning("Aucun tableau a traiter.")
         return []
 
     groups = group_tables(tables)

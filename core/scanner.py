@@ -54,7 +54,7 @@ def scan_pdf(pdf_path: Path, min_cols: int = 8, min_rows: int = 1) -> ScanResult
 
     with pdfplumber.open(pdf_path) as pdf:
         result.total_pages = len(pdf.pages)
-        logger.info("PDF : %d page(s) détectée(s)", result.total_pages)
+        logger.info("PDF : %d page(s) detectee(s)", result.total_pages)
 
         for page in pdf.pages:
             page_num = page.page_number
