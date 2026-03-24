@@ -181,7 +181,10 @@ def compute_metadata(
     full_text = raw.full_text or ""
     c.type_demande = deduce_type(raw.objet_complet, full_text)
     c.categorie = deduce_categorie(c.type_demande, raw.motif_vacance, raw.objet_complet, full_text)
-    c.sous_categorie = deduce_sous_categorie(c.type_demande, c.categorie, full_text)
+
+    # Sous-categorie : chercher dans l'objet + nature travaux du tableau (pas full_text)
+    nature_from_table = table_data.nature_travaux if table_data else ""
+    c.sous_categorie = deduce_sous_categorie(c.type_demande, c.categorie, raw.objet_complet, nature_from_table)
 
     # --- Commentaire = objet exact du courrier ---
     c.commentaire = raw.objet_complet
@@ -208,14 +211,14 @@ def compute_metadata(
     # --- Responsable (valeur fixe) ---
     c.responsable = "Amaury MONGONGU"
 
-    # --- Champs conditionnels (seulement si sous-categorie existe) ---
-    if c.sous_categorie:
-        c.montant_ht = parse_montant(raw.montant_ht_raw) if raw.montant_ht_raw else parse_montant(raw.montant_cotisations_sans_frais)
-        c.nom_entreprise = raw.entreprise_travaux if raw.entreprise_travaux else extract_entreprise(courrier_bytes)
-        c.taux_tva = f"{raw.taux_tva_raw}%" if raw.taux_tva_raw else "0%"
-        c.nature_travaux = raw.nature_travaux_raw if raw.nature_travaux_raw else raw.motif_vacance
-        c.montant_ttc = parse_montant(raw.montant_ttc_raw) if raw.montant_ttc_raw else parse_montant(raw.montant_total_imposition)
-        c.montant_subvention = parse_montant(raw.montant_subvention_raw)
+    # --- Champs extraits du tableau (remplis si disponibles) ---
+    if table_data:
+        c.montant_ht = table_data.montant_ht_total if table_data.montant_ht_total else ""
+        c.nom_entreprise = table_data.nom_entreprise if table_data.nom_entreprise else ""
+        c.taux_tva = table_data.taux_tva if table_data.taux_tva else ""
+        c.nature_travaux = table_data.nature_travaux if table_data.nature_travaux else ""
+        c.montant_ttc = table_data.montant_ttc_total if table_data.montant_ttc_total else ""
+        c.montant_subvention = table_data.montant_subvention if table_data.montant_subvention else ""
     else:
         c.montant_ht = ""
         c.nom_entreprise = ""
@@ -227,8 +230,8 @@ def compute_metadata(
     c.nature_depenses = "Degrevement taxe fonciere"
 
     # Montant demande : tableau (somme) prioritaire, sinon texte courrier
-    if table_data and table_data.montant_degrevement_total > 0:
-        c.montant_demande = table_data.montant_degrevement_total
+    if table_data and table_data.montant_degrevement > 0:
+        c.montant_demande = table_data.montant_degrevement
     else:
         c.montant_demande = parse_montant(raw.montant_degrevement)
 
@@ -239,8 +242,8 @@ def compute_metadata(
         c.ref_avis = raw.ref_avis_imposition.strip()
 
     # Adresse : tableau prioritaire (plus fiable), sinon texte courrier
-    if table_data and table_data.adresses:
-        c.adresse = table_data.adresses
+    if table_data and table_data.adresse:
+        c.adresse = table_data.adresse
     else:
         c.adresse = raw.adresses
 
@@ -248,7 +251,7 @@ def compute_metadata(
         c.nombre_logements = int(raw.nombre_logements) if raw.nombre_logements else 0
     except ValueError:
         c.nombre_logements = 0
-    c.numero_operation = ""
+    c.numero_operation = table_data.n_operation if table_data else ""
 
     # --- Envoi ---
     # Date limite = 31/12 de l'annee suivant l'annee fiscale
@@ -263,7 +266,7 @@ def compute_metadata(
     # Type d'envoi (valeur fixe)
     c.type_envoi = "RecommandeAvecAR"
 
-    c.numero_recommande = raw.numero_lr_depot
+    c.numero_recommande = raw.numero_lr_ar if raw.numero_lr_ar else raw.numero_lr_depot
 
     # --- Interlocuteur (valeurs fixes) ---
     c.nom_interlocuteur = "JOUHANNET"

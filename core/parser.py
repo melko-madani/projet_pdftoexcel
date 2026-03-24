@@ -121,16 +121,17 @@ def _strip_accents(text: str) -> str:
 
 
 def _is_annexe_fiscale(headers: list[str]) -> bool:
-    """Détecte si un tableau est une annexe fiscale (contient programme + référence + avis).
+    """Detecte si un tableau est une annexe fiscale (TABLEAU RECAPITULATIF TFPB).
 
-    Compare sur la version sans espaces ET sans accents pour tolérer les coupures
-    type "program me" et les accents type "référence" introduits par pdfplumber.
+    Un tableau est une Annexe s'il contient au moins 3 marqueurs parmi :
+    programme, operation, commune, installateur, degrevement, davis, montantht.
     """
     joined = " ".join(h.lower().replace("\n", " ") if h else "" for h in headers)
-    normalized = _strip_accents(joined).replace(" ", "")
-    has_programme = "programme" in normalized
-    has_ref_avis = "reference" in normalized and "avis" in normalized
-    return has_programme and has_ref_avis
+    normalized = _strip_accents(joined).replace(" ", "").replace("'", "").replace("\u2019", "")
+
+    markers = ["programme", "operation", "commune", "installateur", "degrevement", "davis", "montantht"]
+    matches = sum(1 for m in markers if m in normalized)
+    return matches >= 3
 
 
 def process_tables(tables: list[TableInfo]) -> list[Dataset]:

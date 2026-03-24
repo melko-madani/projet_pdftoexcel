@@ -156,42 +156,62 @@ def deduce_categorie(type_demande: str, motif: str, objet: str, full_text: str =
 
 # --- Sous-categorie ---
 
-def deduce_sous_categorie(type_demande: str, categorie: str, full_text: str = "") -> str:
+def _match_sous_cat_pmr(text_n: str) -> str:
+    """Cherche une sous-categorie PMR dans un texte normalise."""
+    if _contains(text_n, "parties communes"):
+        return "Aménagement parties communes"
+    if _contains(text_n, "parties privatives"):
+        return "Aménagement parties privatives"
+    if _contains(text_n, "ascenseur"):
+        return "Ascenceur"
+    if _contains(text_n, "cheminement"):
+        return "Cheminements parties communes"
+    if _contains(text_n, "parking", "elargissement"):
+        return "Élargissement/Aménagement parking"
+    if _contains(text_n, "global"):
+        return "Global"
+    return ""
+
+
+def _match_sous_cat_energie(text_n: str) -> str:
+    """Cherche une sous-categorie Economie d'energie dans un texte normalise."""
+    if _contains(text_n, "isolation"):
+        return "Isolation"
+    if _contains(text_n, "chauffage", "refroidissement"):
+        return "Chauffage/Refroidissement"
+    if _contains(text_n, "eclairage"):
+        return "Eclairage"
+    if _contains(text_n, "eau chaude"):
+        return "Eau chaude"
+    if _contains(text_n, "global"):
+        return "Global"
+    return ""
+
+
+def deduce_sous_categorie(type_demande: str, categorie: str, objet: str = "", nature_travaux: str = "") -> str:
     """Deduit la sous-categorie selon le type et la categorie.
 
-    Pour Accessibilité PMR : parties communes/privatives, ascenseur, etc.
-    Pour Economie d'énergie : isolation, chauffage, eclairage, etc.
-    Pour les autres : ""
+    Cherche dans la nature des travaux du tableau (plus fiable car specifique),
+    puis dans l'objet du courrier.
+    Ne cherche PAS dans le texte complet pour eviter les faux positifs.
+    Si rien ne matche, retourne "" (vide).
     """
-    text_n = _normalize(full_text)
+    nature_n = _normalize(nature_travaux) if nature_travaux else ""
+    objet_n = _normalize(objet)
 
     if categorie == "Accessibilité PMR":
-        if _contains(text_n, "parties communes"):
-            return "Aménagement parties communes"
-        if _contains(text_n, "parties privatives"):
-            return "Aménagement parties privatives"
-        if _contains(text_n, "ascenseur"):
-            return "Ascenceur"
-        if _contains(text_n, "cheminement"):
-            return "Cheminements parties communes"
-        if _contains(text_n, "parking", "elargissement"):
-            return "Élargissement/Aménagement parking"
-        if _contains(text_n, "global"):
-            return "Global"
-        return "Autre"
+        if nature_n:
+            result = _match_sous_cat_pmr(nature_n)
+            if result:
+                return result
+        return _match_sous_cat_pmr(objet_n)
 
     if categorie == "Economie d'énergie":
-        if _contains(text_n, "isolation"):
-            return "Isolation"
-        if _contains(text_n, "chauffage", "refroidissement"):
-            return "Chauffage/Refroidissement"
-        if _contains(text_n, "eclairage"):
-            return "Eclairage"
-        if _contains(text_n, "eau chaude"):
-            return "Eau chaude"
-        if _contains(text_n, "global"):
-            return "Global"
-        return "Autre"
+        if nature_n:
+            result = _match_sous_cat_energie(nature_n)
+            if result:
+                return result
+        return _match_sous_cat_energie(objet_n)
 
     return ""
 

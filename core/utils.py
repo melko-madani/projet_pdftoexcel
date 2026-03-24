@@ -12,9 +12,6 @@ TOTAL_KEYWORDS = [
     "montant total",
     "total général",
     "total general",
-    "récapitulatif",
-    "recapitulatif",
-    "somme",
 ]
 
 
@@ -75,9 +72,16 @@ def parse_mois_vacance(value: str) -> int | None:
 
 
 def is_total_row(row: list[str]) -> bool:
-    """Détecte si une ligne est une ligne de total/sous-total."""
-    text = " ".join(clean_cell(cell) for cell in row).lower()
-    return any(keyword in text for keyword in TOTAL_KEYWORDS)
+    """Detecte si une ligne est une ligne de total/sous-total.
+
+    Verifie uniquement la premiere cellule non vide pour eviter les faux positifs
+    (ex: 'SDIF DE LA SOMME' dans une cellule de donnees).
+    """
+    for cell in row:
+        cleaned = clean_cell(cell).lower()
+        if cleaned:
+            return any(keyword in cleaned for keyword in TOTAL_KEYWORDS)
+    return False
 
 
 def is_empty_row(row: list[str]) -> bool:

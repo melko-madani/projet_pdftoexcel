@@ -82,13 +82,12 @@ def scan_pdf(pdf_path: Path, min_cols: int = 8, min_rows: int = 1) -> ScanResult
                 rows = table[1:]
                 col_count = len(headers)
 
-                # Filtrage : faux tableaux (en-tête courrier)
-                first_cells = " ".join(
-                    str(c).strip() for c in raw_headers[:3] if c
-                ).upper()
-                if any(kw in first_cells for kw in ["MELKO", "ENERGIE", "POUR LE COMPTE"]):
+                # Filtrage : faux tableaux (en-tete courrier, avis d'imposition)
+                first_header = (str(raw_headers[0]).strip().lower() if raw_headers and raw_headers[0] else "")
+                bad_words = ["melko", "energie", "pour le compte", "taxes fonci", "cotisation", "debiteur", "taux 20"]
+                if any(w in first_header for w in bad_words):
                     logger.debug(
-                        "Page %d, tableau %d : ignoré (faux tableau en-tête courrier)",
+                        "Page %d, tableau %d : ignore (faux tableau)",
                         page_num, table_idx + 1,
                     )
                     continue

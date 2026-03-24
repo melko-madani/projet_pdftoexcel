@@ -55,6 +55,23 @@ def find_column_index_exact(headers: list[str], keyword: str) -> int | None:
     return None
 
 
+# Mots-cles a chercher dans les headers pour chaque champ metadonnee
+COLUMN_SEARCH = {
+    "ref_avis":       ["davis"],                     # "N° d'avis"
+    "programme":      ["programme"],                 # "N° Programme"
+    "commune":        ["commune"],                   # "Commune"
+    "adresse":        ["adresse", "travaux"],         # "Adresse des travaux"
+    "montant_deg":    ["degrevement"],               # "Montant degrevement demande"
+    "montant_ht":     ["montant", "ht", "facture"],  # "Montant HT facture"
+    "taux_tva":       ["taux", "tva"],               # "Taux de TVA facture"
+    "montant_ttc":    ["montant", "ttc", "facture"], # "Montant TTC facture"
+    "subvention":     ["subvention"],                # "Montant subventions encaisses"
+    "nature_travaux": ["nature", "travaux"],         # "NATURE DES TRAVAUX"
+    "installateur":   ["installateur"],              # "Installateur"
+    "n_operation":    ["operation"],                  # "N°OPERATION"
+}
+
+
 def is_valid_value(value, min_length: int = 3) -> bool:
     """Verifie qu'une valeur n'est pas un parasite."""
     if value is None:
@@ -91,7 +108,7 @@ def is_valid_programme(value) -> bool:
     """Verifie qu'une valeur est un N de programme valide (3-5 chiffres)."""
     if value is None:
         return False
-    # Gerer les floats type 1146.0 → "1146"
+    # Gerer les floats type 1146.0 -> "1146"
     if isinstance(value, float) and value == int(value):
         value = int(value)
     text = str(value).strip()
@@ -106,7 +123,7 @@ def is_valid_programme(value) -> bool:
 def parse_montant_cell(value) -> float:
     """Convertit une cellule montant en float.
 
-    Gere : '791 euro', '791,00 euro', '791', '1 002', 791.0, vide → 0.0
+    Gere : '791 euro', '791,00 euro', '791', '1 002', 791.0, vide -> 0.0
     """
     if value is None:
         return 0.0
@@ -120,7 +137,7 @@ def parse_montant_cell(value) -> float:
     text = re.sub(r"\s*euros?\s*", "", text, flags=re.IGNORECASE)
     # Supprimer espaces (separateurs milliers)
     text = re.sub(r"\s+", "", text)
-    # Virgule → point
+    # Virgule -> point
     text = text.replace(",", ".")
     try:
         return float(text)
@@ -128,93 +145,175 @@ def parse_montant_cell(value) -> float:
         return 0.0
 
 
+def _extract_cell_str(row, col_idx) -> str:
+    """Extrait une valeur de cellule en string, gere float->int."""
+    if col_idx is None or col_idx >= len(row):
+        return ""
+    val = row[col_idx]
+    if val is None:
+        return ""
+    if isinstance(val, float) and val == int(val):
+        val = int(val)
+    return str(val).strip()
+
+
+def _parse_taux_tva(value) -> str:
+    """Extrait le taux de TVA d'une cellule. Ex: '20', '20%', 0.2 -> '20%'."""
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)):
+        # 0.2 -> 20%, 20.0 -> 20%
+        v = float(value)
+        if v < 1:
+            v = v * 100
+        return f"{v:g}%"
+    text = str(value).strip()
+    if not text:
+        return ""
+    text = text.replace("%", "").replace(",", ".").strip()
+    try:
+        v = float(text)
+        if v < 1:
+            v = v * 100
+        return f"{v:g}%"
+    except ValueError:
+        return ""
+
+
 @dataclass
 class TableExtractedData:
     """Donnees extraites des colonnes des tableaux annexes."""
-    references_avis: str = ""  # "ref1, ref2"
-    adresses: str = ""  # "addr1 / addr2 / ..."
-    montant_degrevement_total: float = 0.0
-    numero_programme: str = ""  # "1146" ou "1101, 1146"
-    commune: str = ""  # "AMIENS"
-    adresses_liste: list = field(default_factory=list)
+    references_avis: str = ""       # valeurs uniques de "N° d'avis" jointes par ";"
+    numero_programme: str = ""      # valeurs uniques de "N° Programme" jointes par ","
+    commune: str = ""               # valeur unique de "Commune"
+    adresse: str = ""               # valeurs uniques de "Adresse des travaux" jointes par ";"
+    montant_degrevement: float = 0.0  # somme de "Montant degrevement demande"
+    montant_ht_total: str = ""      # somme de "Montant HT facture"
+    taux_tva: str = ""              # valeurs uniques de "Taux de TVA facture" jointes par ";"
+    montant_ttc_total: str = ""     # somme de "Montant TTC facture"
+    montant_subvention: str = ""    # somme de "Montant subventions encaisses"
+    nature_travaux: str = ""        # valeurs uniques de "NATURE DES TRAVAUX" jointes par ";"
+    nom_entreprise: str = ""        # valeurs uniques de "Installateur" jointes par ";"
+    n_operation: str = ""           # valeurs uniques de "N°OPERATION" jointes par ","
 
 
 def extract_from_datasets(datasets: list) -> TableExtractedData:
-    """Extrait les donnees cibles depuis les datasets en memoire.
+    """Parcourt les datasets (feuilles Annexe uniquement) et extrait les valeurs.
 
     Args:
-        datasets: Liste d'objets avec .headers (list[str]) et .data_rows (list[list])
+        datasets: Liste d'objets avec .name, .headers (list[str]) et .data_rows (list[list])
 
     Returns:
         TableExtractedData avec les donnees extraites.
     """
-    refs_set: list[str] = []  # ordered unique
-    addrs_set: list[str] = []
-    progs_set: list[str] = []
-    communes_set: list[str] = []
-    montant_sum = 0.0
-
-    refs_seen = set()
-    addrs_seen = set()
-    progs_seen = set()
-    communes_seen = set()
+    all_ref_avis: set[str] = set()
+    all_programmes: set[str] = set()
+    all_communes: set[str] = set()
+    all_adresses: set[str] = set()
+    total_degrevement = 0.0
+    total_ht = 0.0
+    total_ttc = 0.0
+    total_subvention = 0.0
+    all_natures: set[str] = set()
+    all_installateurs: set[str] = set()
+    all_operations: set[str] = set()
+    all_taux_tva: set[str] = set()
 
     for ds in datasets:
+        # Ne traiter que les feuilles Annexe
+        if not ds.name or "annexe" not in ds.name.lower():
+            continue
+
         headers = ds.headers
 
-        # Trouver les colonnes cibles
-        ref_col = find_column_index(headers, ["reference", "avis"])
-        addr_col = find_column_index_exact(headers, "adresse")
-        montant_col = find_column_index(headers, ["montant", "degrevement"])
-        prog_col = find_column_index(headers, ["programme"])
-        commune_col = find_column_index_exact(headers, "commune")
+        # Trouver l'index de chaque colonne
+        idx_ref = find_column_index(headers, COLUMN_SEARCH["ref_avis"])
+        idx_prog = find_column_index(headers, COLUMN_SEARCH["programme"])
+        idx_commune = find_column_index(headers, COLUMN_SEARCH["commune"])
+        idx_addr = find_column_index(headers, COLUMN_SEARCH["adresse"])
+        idx_deg = find_column_index(headers, COLUMN_SEARCH["montant_deg"])
+        idx_ht = find_column_index(headers, COLUMN_SEARCH["montant_ht"])
+        idx_tva = find_column_index(headers, COLUMN_SEARCH["taux_tva"])
+        idx_ttc = find_column_index(headers, COLUMN_SEARCH["montant_ttc"])
+        idx_sub = find_column_index(headers, COLUMN_SEARCH["subvention"])
+        idx_nature = find_column_index(headers, COLUMN_SEARCH["nature_travaux"])
+        idx_install = find_column_index(headers, COLUMN_SEARCH["installateur"])
+        idx_oper = find_column_index(headers, COLUMN_SEARCH["n_operation"])
 
         logger.info(
-            "Dataset '%s': ref=%s, addr=%s, montant=%s, prog=%s, commune=%s",
-            ds.name, ref_col, addr_col, montant_col, prog_col, commune_col,
+            "Annexe '%s': ref=%s, prog=%s, commune=%s, addr=%s, deg=%s, ht=%s, oper=%s",
+            ds.name, idx_ref, idx_prog, idx_commune, idx_addr, idx_deg, idx_ht, idx_oper,
         )
 
         for row in ds.data_rows:
             # References avis
-            if ref_col is not None and ref_col < len(row):
-                val = str(row[ref_col]).strip() if row[ref_col] is not None else ""
-                if is_valid_value(val, min_length=5) and val not in refs_seen:
-                    refs_seen.add(val)
-                    refs_set.append(val)
-
-            # Adresses
-            if addr_col is not None and addr_col < len(row):
-                val = str(row[addr_col]).strip() if row[addr_col] is not None else ""
-                if is_valid_address(val) and val not in addrs_seen:
-                    addrs_seen.add(val)
-                    addrs_set.append(val)
-
-            # Montant degrevement (somme)
-            if montant_col is not None and montant_col < len(row):
-                montant_sum += parse_montant_cell(row[montant_col])
+            val = _extract_cell_str(row, idx_ref)
+            if val and is_valid_value(val, min_length=5):
+                all_ref_avis.add(val)
 
             # Programme
-            if prog_col is not None and prog_col < len(row):
-                raw_val = row[prog_col]
-                if isinstance(raw_val, float) and raw_val == int(raw_val):
-                    raw_val = int(raw_val)
-                val = str(raw_val).strip() if raw_val is not None else ""
-                if is_valid_programme(val) and val not in progs_seen:
-                    progs_seen.add(val)
-                    progs_set.append(val)
+            val = _extract_cell_str(row, idx_prog)
+            if val and is_valid_programme(val):
+                all_programmes.add(val)
 
             # Commune
-            if commune_col is not None and commune_col < len(row):
-                val = str(row[commune_col]).strip() if row[commune_col] is not None else ""
-                if is_valid_value(val) and val not in communes_seen:
-                    communes_seen.add(val)
-                    communes_set.append(val)
+            val = _extract_cell_str(row, idx_commune)
+            if val and is_valid_value(val):
+                all_communes.add(val)
+
+            # Adresse
+            val = _extract_cell_str(row, idx_addr)
+            if val and is_valid_address(val):
+                all_adresses.add(val)
+
+            # Montant degrevement (somme)
+            if idx_deg is not None and idx_deg < len(row):
+                total_degrevement += parse_montant_cell(row[idx_deg])
+
+            # Montant HT (somme)
+            if idx_ht is not None and idx_ht < len(row):
+                total_ht += parse_montant_cell(row[idx_ht])
+
+            # Montant TTC (somme)
+            if idx_ttc is not None and idx_ttc < len(row):
+                total_ttc += parse_montant_cell(row[idx_ttc])
+
+            # Montant subvention (somme)
+            if idx_sub is not None and idx_sub < len(row):
+                total_subvention += parse_montant_cell(row[idx_sub])
+
+            # Taux TVA (valeurs uniques)
+            if idx_tva is not None and idx_tva < len(row) and not all_taux_tva:
+                parsed = _parse_taux_tva(row[idx_tva])
+                if parsed:
+                    all_taux_tva.add(parsed)
+
+            # Nature travaux (valeurs uniques)
+            val = _extract_cell_str(row, idx_nature)
+            if val:
+                all_natures.add(val)
+
+            # Installateur (valeurs uniques)
+            val = _extract_cell_str(row, idx_install)
+            if val:
+                all_installateurs.add(val)
+
+            # N° Operation (valeurs uniques)
+            val = _extract_cell_str(row, idx_oper)
+            if val:
+                all_operations.add(val)
 
     return TableExtractedData(
-        references_avis=", ".join(refs_set),
-        adresses=";".join(addrs_set),
-        montant_degrevement_total=montant_sum,
-        numero_programme=", ".join(progs_set),
-        commune=", ".join(communes_set) if len(communes_set) > 1 else (communes_set[0] if communes_set else ""),
-        adresses_liste=addrs_set,
+        references_avis=";".join(sorted(all_ref_avis)),
+        numero_programme=", ".join(sorted(all_programmes)),
+        commune=", ".join(sorted(all_communes)) if len(all_communes) > 1 else (next(iter(all_communes)) if all_communes else ""),
+        adresse=";".join(sorted(all_adresses)),
+        montant_degrevement=total_degrevement,
+        montant_ht_total=f"{total_ht:.2f}" if total_ht > 0 else "",
+        taux_tva=";".join(sorted(all_taux_tva)),
+        montant_ttc_total=f"{total_ttc:.2f}" if total_ttc > 0 else "",
+        montant_subvention=f"{total_subvention:.2f}" if total_subvention > 0 else "",
+        nature_travaux=";".join(sorted(all_natures)),
+        nom_entreprise=";".join(sorted(all_installateurs)),
+        n_operation=", ".join(sorted(all_operations)),
     )

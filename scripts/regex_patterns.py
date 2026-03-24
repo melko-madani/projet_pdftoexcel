@@ -12,7 +12,8 @@ PATTERN_ANNEE_TITRE = re.compile(r"au\s+titre\s+de\s+l['\u2019]ann[ée]e\s*(20\d
 PATTERN_ANNEE_TITRE_TFPB = re.compile(r"au\s+titre\s+de\s+la\s+TFPB\s*(20\d{2})", re.IGNORECASE)
 PATTERN_ANNEE_FALLBACK = re.compile(r"(20\d{2})")
 PATTERN_OBJET = re.compile(
-    r"Objet\s*:\s*(.+?)(?=Adresses\s+concern[ée]es)", re.DOTALL | re.IGNORECASE
+    r"Objet\s*:?\s*(.+?)(?=Adresses\s+concern[ée]es|R[ée]f[ée]rences\s*:|Pi[èe]ces\s+jointes|Monsieur|Madame)",
+    re.DOTALL | re.IGNORECASE,
 )
 PATTERN_ADRESSES = re.compile(
     r"Adresses\s+concern[ée]es\s*:\s*(.+?)(?=Motif)", re.DOTALL | re.IGNORECASE
@@ -96,7 +97,7 @@ PATTERN_MONTANT_SUBVENTION = re.compile(
 
 # --- Patterns AR et depot ---
 
-PATTERN_NUM_LR = re.compile(r"(\d{15})")
+PATTERN_NUM_LR = re.compile(r"(\d{13,14}[A-Za-z])")
 PATTERN_DATE_DDMMYYYY = re.compile(r"(\d{2}/\d{2}/\d{4})")
 PATTERN_PRESENTATION_AR = re.compile(
     r"(?:Pr[ée]sent[ée]e|avis[ée]e)\s+(?:le\s+)?(\d{1,2}/\d{1,2}/\d{4})",
